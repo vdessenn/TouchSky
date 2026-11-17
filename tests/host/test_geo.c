@@ -112,9 +112,56 @@ void test_project_north_is_up_east_is_right(void)
     TEST_ASSERT_TRUE(x < 100);
 }
 
+void test_destination_round_trip(void)
+{
+    for (int b = 0; b < 360; b += 45) {
+        double lat, lon;
+        geo_destination(LAT0, LON0, b, 12.5, &lat, &lon);
+        TEST_ASSERT_DOUBLE_WITHIN(1e-6, 12.5, geo_distance_nm(LAT0, LON0, lat, lon));
+    }
+}
+
+void test_destination_directions(void)
+{
+    double lat, lon;
+    geo_destination(LAT0, LON0, 0, 30, &lat, &lon);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, LAT0 + 0.5, lat);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, LON0, lon);
+    geo_destination(LAT0, LON0, 180, 30, &lat, &lon);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, LAT0 - 0.5, lat);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, LON0, lon);
+    geo_destination(LAT0, LON0, 90, 30, &lat, &lon);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, LAT0, lat);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, LON0 + dlon(30), lon);
+    geo_destination(LAT0, LON0, 270, 30, &lat, &lon);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, LAT0, lat);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, LON0 - dlon(30), lon);
+}
+
+void test_destination_zero_distance(void)
+{
+    double lat, lon;
+    geo_destination(LAT0, LON0, 123, 0, &lat, &lon);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, LAT0, lat);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, LON0, lon);
+}
+
+void test_destination_wraps_longitude(void)
+{
+    double lat, lon;
+    geo_destination(0, 179.9, 90, 30, &lat, &lon); // 30 nm is about 0.5 degree at the equator
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, -179.6, lon);
+    geo_destination(0, -179.9, 270, 30, &lat, &lon);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, 179.6, lon);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_destination_round_trip);
+    RUN_TEST(test_destination_directions);
+    RUN_TEST(test_destination_zero_distance);
+    RUN_TEST(test_destination_wraps_longitude);
     RUN_TEST(test_distance_zero);
     RUN_TEST(test_distance_one_degree_lat);
     RUN_TEST(test_distance_symmetric);
