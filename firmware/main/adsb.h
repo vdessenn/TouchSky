@@ -17,8 +17,13 @@ typedef struct {
     bool has_track;   // false when "track" is absent
     float track_deg;  // true track, 0..360, 0 = north, clockwise
     float gs_kt;      // ground speed in knots, 0 if absent
+    float seen_pos_s; // age of lat/lon when the response was built, 0 if absent
     float dist_nm;    // distance from the centre given to adsb_parse()
 } adsb_aircraft_t;
+
+// Dead reckoning stops this many seconds after the reported position, so an
+// aircraft does not drift on when the data stops coming.
+#define ADSB_MAX_EXTRAPOLATION_S 20.0f
 
 // Writes the request URL for all aircraft within range_nm of (lat, lon):
 // "https://api.adsb.lol/v2/point/<lat>/<lon>/<range_nm>", lat/lon with 4 decimals.
@@ -33,6 +38,12 @@ bool adsb_build_url(char *buf, size_t size, double lat, double lon, int range_nm
 // or has no "ac" array.
 int adsb_parse(const char *json, double center_lat, double center_lon,
                adsb_aircraft_t *out, int max);
+
+// Where ac is elapsed_s seconds after its response arrived, assuming it keeps
+// its track and ground speed. The position is already seen_pos_s old in the
+// response; the total age is capped at ADSB_MAX_EXTRAPOLATION_S. Aircraft
+// without a track stay where they were reported.
+void adsb_extrapolate(const adsb_aircraft_t *ac, float elapsed_s, double *lat, double *lon);
 
 // Name shown for an aircraft: its callsign, or its hex address when the
 // callsign is empty. The returned pointer lives as long as *ac.

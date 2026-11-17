@@ -85,6 +85,10 @@ int adsb_parse(const char *json, double center_lat, double center_lon,
         if (cJSON_IsNumber(v)) {
             ac.gs_kt = (float)v->valuedouble;
         }
+        v = cJSON_GetObjectItem(item, "seen_pos");
+        if (cJSON_IsNumber(v)) {
+            ac.seen_pos_s = (float)v->valuedouble;
+        }
 
         if (n < max) {
             out[n++] = ac;
@@ -103,6 +107,17 @@ int adsb_parse(const char *json, double center_lat, double center_lon,
     cJSON_Delete(root);
     qsort(out, n, sizeof(*out), by_distance);
     return n;
+}
+
+void adsb_extrapolate(const adsb_aircraft_t *ac, float elapsed_s, double *lat, double *lon)
+{
+    float age_s = fminf(fmaxf(ac->seen_pos_s + elapsed_s, 0), ADSB_MAX_EXTRAPOLATION_S);
+    if (!ac->has_track || ac->gs_kt <= 0 || age_s == 0) {
+        *lat = ac->lat;
+        *lon = ac->lon;
+        return;
+    }
+    geo_destination(ac->lat, ac->lon, ac->track_deg, ac->gs_kt * age_s / 3600, lat, lon);
 }
 
 const char *adsb_name(const adsb_aircraft_t *ac)

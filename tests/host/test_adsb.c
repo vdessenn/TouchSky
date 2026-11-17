@@ -93,6 +93,7 @@ void test_parse_fixture_known_aircraft(void)
     TEST_ASSERT_TRUE(a->has_alt);
     TEST_ASSERT_FALSE(a->on_ground);
     TEST_ASSERT_EQUAL_INT(1200, a->alt_ft);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 1.087f, a->seen_pos_s);
     a = find_hex(n, "4cae98"); // "RYR994L ", alt_baro 35725
     TEST_ASSERT_NOT_NULL(a);
     TEST_ASSERT_EQUAL_STRING("RYR994L", a->callsign);
@@ -145,12 +146,13 @@ void test_parse_optional_fields_absent(void)
     TEST_ASSERT_FALSE(out[0].on_ground);
     TEST_ASSERT_EQUAL_INT(0, out[0].alt_ft);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, out[0].gs_kt);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, out[0].seen_pos_s);
 }
 
 void test_parse_all_fields(void)
 {
     const char *j = "{\"ac\":[{\"hex\":\"abc123\",\"flight\":\"  AF123 \",\"lat\":48.9,"
-                    "\"lon\":2.4,\"alt_baro\":36000,\"track\":123.5,\"gs\":450.5}]}";
+                    "\"lon\":2.4,\"alt_baro\":36000,\"track\":123.5,\"gs\":450.5,\"seen_pos\":1.5}]}";
     TEST_ASSERT_EQUAL_INT(1, adsb_parse(j, CLAT, CLON, out, 10));
     TEST_ASSERT_EQUAL_STRING("AF123", out[0].callsign);
     TEST_ASSERT_TRUE(out[0].has_alt);
@@ -159,6 +161,7 @@ void test_parse_all_fields(void)
     TEST_ASSERT_TRUE(out[0].has_track);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 123.5f, out[0].track_deg);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 450.5f, out[0].gs_kt);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.5f, out[0].seen_pos_s);
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, 48.9, out[0].lat);
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, 2.4, out[0].lon);
 }
@@ -212,6 +215,67 @@ void test_parse_no_ac(void)
 {
     TEST_ASSERT_EQUAL_INT(-1, adsb_parse("{\"msg\":\"No error\",\"total\":0}", CLAT, CLON, out, 10));
     TEST_ASSERT_EQUAL_INT(-1, adsb_parse("{\"ac\":null}", CLAT, CLON, out, 10));
+}
+
+// ---- extrapolate ----
+static adsb_aircraft_t moving(float track, float gs, float seen_pos)
+{
+    adsb_aircraft_t a;
+    memset(&a, 0, sizeof a);
+    a.lat = CLAT;
+    a.lon = CLON;
+    a.has_track = true;
+    a.track_deg = track;
+    a.gs_kt = gs;
+    a.seen_pos_s = seen_pos;
+    return a;
+}
+
+void test_extrapolate_east(void)
+{
+    adsb_aircraft_t a = moving(90, 360, 0); // 0.1 nm/s
+    double lat, lon;
+    adsb_extrapolate(&a, 10, &lat, &lon);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-3, 1.0, geo_distance_nm(CLAT, CLON, lat, lon));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-3, CLAT, lat);
+    TEST_ASSERT_TRUE(lon > CLON);
+}
+
+void test_extrapolate_counts_position_age(void)
+{
+    adsb_aircraft_t a = moving(0, 360, 4); // position already 4 s old in the response
+    double lat, lon;
+    adsb_extrapolate(&a, 6, &lat, &lon);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-3, 1.0, geo_distance_nm(CLAT, CLON, lat, lon));
+    TEST_ASSERT_TRUE(lat > CLAT);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, CLON, lon);
+}
+
+void test_extrapolate_capped(void)
+{
+    adsb_aircraft_t a = moving(180, 360, 0);
+    double lat, lon;
+    adsb_extrapolate(&a, 3600, &lat, &lon);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-3, 0.1 * ADSB_MAX_EXTRAPOLATION_S, geo_distance_nm(CLAT, CLON, lat, lon));
+    TEST_ASSERT_TRUE(lat < CLAT);
+}
+
+static void check_stays_put(const adsb_aircraft_t *a, float elapsed_s)
+{
+    double lat, lon;
+    adsb_extrapolate(a, elapsed_s, &lat, &lon);
+    TEST_ASSERT_EQUAL_DOUBLE(a->lat, lat);
+    TEST_ASSERT_EQUAL_DOUBLE(a->lon, lon);
+}
+
+void test_extrapolate_stays_put(void)
+{
+    adsb_aircraft_t a = moving(90, 360, 0);
+    check_stays_put(&a, 0); // no time has passed
+    a.has_track = false;    // direction unknown
+    check_stays_put(&a, 10);
+    a = moving(90, 0, 0);   // not moving
+    check_stays_put(&a, 10);
 }
 
 // ---- name ----
@@ -301,6 +365,10 @@ int main(void)
     RUN_TEST(test_parse_empty_ac);
     RUN_TEST(test_parse_invalid);
     RUN_TEST(test_parse_no_ac);
+    RUN_TEST(test_extrapolate_east);
+    RUN_TEST(test_extrapolate_counts_position_age);
+    RUN_TEST(test_extrapolate_capped);
+    RUN_TEST(test_extrapolate_stays_put);
     RUN_TEST(test_name);
     RUN_TEST(test_alt_special);
     RUN_TEST(test_alt_flight_level);

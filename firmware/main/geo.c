@@ -14,6 +14,16 @@ double geo_distance_nm(double lat1, double lon1, double lat2, double lon2)
     return 2 * EARTH_RADIUS_NM * asin(sqrt(a));
 }
 
+void geo_destination(double lat, double lon, double bearing_deg, double dist_nm,
+                     double *lat2, double *lon2)
+{
+    double p1 = lat * DEG_TO_RAD, b = bearing_deg * DEG_TO_RAD, d = dist_nm / EARTH_RADIUS_NM;
+    double p2 = asin(sin(p1) * cos(d) + cos(p1) * sin(d) * cos(b));
+    double dl = atan2(sin(b) * sin(d) * cos(p1), cos(d) - sin(p1) * sin(p2));
+    *lat2 = p2 / DEG_TO_RAD;
+    *lon2 = fmod(lon + dl / DEG_TO_RAD + 540.0, 360.0) - 180.0;
+}
+
 bool geo_project(const geo_view_t *view, double lat, double lon, int *x, int *y)
 {
     // Azimuthal equidistant: true distance and initial bearing from the centre,

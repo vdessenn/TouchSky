@@ -18,6 +18,7 @@
 #define MAX_LABELS 40    // closest aircraft labelled on the scope
 #define MAX_AIRPORT_LABELS 40
 #define RUNWAYS_MAX_RANGE_NM 50 // runways and medium airports are noise beyond
+#define ANIM_PERIOD_MS 500      // aircraft move under 1 px per step at 25 nm
 
 #define RGB565(r, g, b) ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
 #define C_RING RGB565(0, 90, 45)
@@ -36,6 +37,14 @@ static lv_obj_t *s_clock, *s_status, *s_count, *s_names, *s_alts, *s_dists;
 static adsb_aircraft_t s_aircraft[ADSB_MAX_AIRCRAFT];
 static int s_n;
 static bool s_online;
+static uint32_t s_received_ms; // lv_tick_get() when s_aircraft arrived
+
+// Where each aircraft is drawn, extrapolated from its last report.
+typedef struct {
+    int16_t x, y; // relative to the scope
+    bool in_range;
+} plane_pos_t;
+static plane_pos_t s_pos[ADSB_MAX_AIRCRAFT];
 
 // ---- static layer: drawn straight into the frame buffer ----
 
@@ -170,6 +179,33 @@ static void draw_map(void)
 
 // ---- aircraft layer: redrawn by LVGL on top of the map ----
 
+// Moves every aircraft to where it should be now. Returns true when one of
+// them changed pixel, i.e. when the layer needs redrawing.
+static bool place_planes(void)
+{
+    float elapsed_s = lv_tick_elaps(s_received_ms) / 1000.0f;
+    bool moved = false;
+    for (int i = 0; i < s_n; i++) {
+        double lat, lon;
+        int x, y;
+        adsb_extrapolate(&s_aircraft[i], elapsed_s, &lat, &lon);
+        bool in_range = geo_project(&s_view, lat, lon, &x, &y);
+        plane_pos_t p = {(int16_t)x, (int16_t)y, in_range};
+        if (p.x != s_pos[i].x || p.y != s_pos[i].y || p.in_range != s_pos[i].in_range) {
+            s_pos[i] = p;
+            moved = true;
+        }
+    }
+    return moved;
+}
+
+static void tick_planes(lv_timer_t *timer)
+{
+    if (lv_screen_active() == s_screen && place_planes()) {
+        lv_obj_invalidate(s_planes);
+    }
+}
+
 static void draw_planes(lv_event_t *e)
 {
     lv_layer_t *layer = lv_event_get_layer(e);
@@ -180,12 +216,10 @@ static void draw_planes(lv_event_t *e)
     int labels = 0;
     for (int i = 0; i < s_n; i++) {
         const adsb_aircraft_t *ac = &s_aircraft[i];
-        int x, y;
-        if (!geo_project(&s_view, ac->lat, ac->lon, &x, &y)) {
+        if (!s_pos[i].in_range) {
             continue;
         }
-        x += origin.x1;
-        y += origin.y1;
+        int x = s_pos[i].x + origin.x1, y = s_pos[i].y + origin.y1;
         lv_color_t color = !s_online || ac->on_ground ? stale : live;
 
         if (ac->has_track) {
@@ -246,6 +280,8 @@ void radar_ui_update(const adsb_aircraft_t *list, int count)
 {
     memcpy(s_aircraft, list, count * sizeof(*list));
     s_n = count;
+    s_received_ms = lv_tick_get();
+    place_planes();
     s_online = true;
     lv_label_set_text(s_status, "Live");
     lv_obj_set_style_text_color(s_status, lv_color_make(60, 255, 130), 0);
@@ -353,4 +389,5 @@ void radar_ui_create(const mapdata_t *map, void (*on_settings)(void))
     lv_obj_center(text);
 
     lv_timer_create(tick_clock, 1000, NULL);
+    lv_timer_create(tick_planes, ANIM_PERIOD_MS, NULL);
 }
