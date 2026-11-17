@@ -25,6 +25,19 @@ target_include_directories(lvgl PUBLIC "${lvgl_SOURCE_DIR}" "${CMAKE_CURRENT_SOU
 target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
 target_compile_options(lvgl PRIVATE -w)
 
+# Optional live window (run.sh --window). Without SDL2 only screenshots work.
+find_program(SDL2_CONFIG sdl2-config)
+if(SDL2_CONFIG)
+    execute_process(COMMAND ${SDL2_CONFIG} --cflags OUTPUT_VARIABLE SDL_CFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND ${SDL2_CONFIG} --libs OUTPUT_VARIABLE SDL_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
+    string(REPLACE "-lSDL2main" "" SDL_LIBS "${SDL_LIBS}") # we have our own main()
+    separate_arguments(SDL_CFLAGS NATIVE_COMMAND "${SDL_CFLAGS}")
+    separate_arguments(SDL_LIBS NATIVE_COMMAND "${SDL_LIBS}")
+    target_compile_definitions(lvgl PUBLIC SIM_SDL)
+    target_compile_options(lvgl PUBLIC ${SDL_CFLAGS})
+    target_link_libraries(lvgl PUBLIC ${SDL_LIBS})
+endif()
+
 add_executable(touchsky_sim
     main.c
     "${FW}/radar_ui.c" "${FW}/settings_ui.c"

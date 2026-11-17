@@ -101,6 +101,16 @@ Screenshots of the radar and settings screens land in `sim/out/`.
 To use live traffic, save an API answer first:
 `curl -o traffic.json https://api.adsb.lol/v2/point/51.47/-0.45/50`.
 
+With [SDL2](https://www.libsdl.org) installed (`brew install sdl2`), the simulator can also open a live window,
+where the mouse acts as the finger on the touch screen:
+
+```sh
+sim/run.sh --window                          # captured response, Paris, 25 nm
+sim/run.sh --window 51.47 -0.45 50 live      # live traffic from adsb.lol, refreshed every 5 s
+```
+
+The captured response is shown once and does not refresh, so aircraft only move as far as the firmware extrapolates them.
+
 ## Data sources and credits
 
 - Live aircraft positions: [adsb.lol](https://adsb.lol), a community-run ADS-B network
